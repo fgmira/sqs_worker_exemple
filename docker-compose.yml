@@ -1,0 +1,86 @@
+services:
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+    volumes:
+      - './services_config/nginx/etc/nginex.conf:/etc/nginx/nginx.conf'
+    depends_on:
+      - app
+
+  otel:
+    image: grafana/otel-lgtm:latest
+    ports:
+      - 3000:3000 # grafana
+      - 9090:9090 # prometheus
+      - 4318:4318 # otel collector http
+      - 4317:4317 # otel collector grpc
+
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566-4599:4566-4599"
+    environment:
+      - LS_LOG=info
+      - SERVICES=sqs
+      - QUEUE_NAME=service_queue
+    volumes:
+      - './services_config/aws_localstack/:/etc/localstack/init/ready.d/'
+
+  redis:
+    image: redis:latest
+    command: redis-server --requirepass test
+    ports:
+      - "6379:6379"
+
+
+  app:
+    build: ./app/.
+    ports:
+      - 8001:8001
+    depends_on:
+      - otel
+      - localstack
+    environment:
+      - OTEL_EXPORTER_OTLP_INSECURE=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel:4317
+      - OTEL_METRICS_EXPORTER=otlp
+      - OTEL_LOGS_EXPORTER=otlp,console
+      - OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED=true
+      - LOG_LEVEL=DEBUG
+      - OTEL_SERVICE_NAME=app
+      - OTEL_METRIC_EXPORT_INTERVAL=1000
+      - COLLECTOR_OTLP_ENABLED=true
+      - AWS_ACCESS_KEY_ID=123
+      - AWS_SECRET_ACCESS_KEY=123
+      - AWS_DEFAULT_REGION=us-east-1
+      - ENDPOINT_URL=http://localstack:4566
+      - QUEUE_NAME=service_queue
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=test
+    
+  worker:
+    build: ./worker/.
+    depends_on:
+      - app
+    environment:
+      - OTEL_EXPORTER_OTLP_INSECURE=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel:4317
+      - OTEL_METRICS_EXPORTER=otlp
+      - OTEL_LOGS_EXPORTER=otlp,console
+      - OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED=true
+      - LOG_LEVEL=DEBUG
+      - OTEL_SERVICE_NAME=worker
+      - OTEL_METRIC_EXPORT_INTERVAL=1000
+      - COLLECTOR_OTLP_ENABLED=true
+      - AWS_ACCESS_KEY_ID=123
+      - AWS_SECRET_ACCESS_KEY=123
+      - AWS_DEFAULT_REGION=us-east-1
+      - ENDPOINT_URL=http://localstack:4566
+      - QUEUE_NAME=service_queue
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=test
+    env_file:
+      - ./worker/.env
